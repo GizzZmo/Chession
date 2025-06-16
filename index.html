@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scalable Chess Platform - Canvas MVP</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Canvas Chess MVP</h1>
+    <p>A tangible implementation of the architectural blueprint.</p>
+    
+    <div class="board-container">
+        <canvas id="chessboard" width="640" height="640"></canvas>
+    </div>
+
+    <div id="game-status" class="status-panel">
+        Loading game...
+    </div>
+    <button id="reset-button">New Game</button>
+
+    <!-- Load chess.js as an ES Module -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
