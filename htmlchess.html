@@ -1,0 +1,1053 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
+
+// MIT License
+// Copyright (c) 2024 Gemini
+
+// Tillatelse er herved gitt, gratis, til enhver person som mottar en kopi
+// av denne programvaren og tilhørende dokumentasjonsfiler ("Programvaren"),
+// å håndtere Programvaren uten begrensninger, inkludert uten begrensning
+// rettighetene til å bruke, kopiere, modifisere, flette, publisere,
+// distribuere, underlisensiere, og/eller selge kopier av Programvaren,
+// og å tillate personer som Programvaren er møblert til å gjøre det,
+// underlagt følgende betingelser:
+
+// Ovenstående copyright-merknad og denne tillatelsesmerknaden skal inkluderes i
+// alle kopier eller vesentlige deler av Programvaren.
+
+// PROGRAMVAREN LEVERES "AS IS", UTEN GARANTI AV NOEN ART, UTTRYKKT ELLER
+// UNDERFORSTÅTT, INKLUDERT MEN IKKE BEGRENSET TIL GARANTIER OM SALGBARHET,
+// EGNETHET FOR ET BESTEMT FORMÅL OG IKKE-OVERTREDELSE. IKKE UNDER NOEN OMSTENDIGHET
+// SKAL FORFATTERNE ELLER COPYRIGHT-INNEHAVERNE VÆRE ANSVARLIGE FOR NOEN KRAV, SKADER
+// ELLER ANNET ANSVAR, ENTEN I EN HANDLING OM KONTRAKT, TORT ELLER PÅ ANNEN MÅTE,
+// SOM OPPSTÅR FRA, UT AV ELLER I FORBINDELSE MED PROGRAMVAREN ELLER BRUKEN ELLER
+// ANDRE FORHOLD I PROGRAMVAREN.
+
+// --- SVG-ikoner for brikkene med cyberpunk-steampunk tema ---
+const getPieceSVG = (type, color) => {
+  // Farger for brikker: Cyan for hvit, Fuchsia for svart
+  const fill = color === 'white' ? 'fill-cyan-300' : 'fill-fuchsia-600';
+  const stroke = color === 'white' ? 'stroke-cyan-500' : 'stroke-fuchsia-800';
+  const svgBase = `w-10 h-10 transition-transform duration-200 hover:scale-110 ${fill} ${stroke} stroke-[1.5px] drop-shadow-lg`;
+
+  switch (type) {
+    case 'King':
+      return (
+        <svg className={svgBase} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2L12 6M9 3H15M12 18V22M9 21H15M12 6C8 6 6 10 6 14S8 22 12 22S18 18 18 14S16 6 12 6Z" />
+        </svg>
+      );
+    case 'Queen':
+      return (
+        <svg className={svgBase} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2C8 2 6 6 6 10S8 18 12 18S18 14 18 10S16 2 12 2Z" />
+          <path d="M6 10L3 18L6 22L18 22L21 18L18 10Z" />
+          <path d="M9 3L12 6L15 3M9 10L6 14L9 18L15 18L18 14L15 10Z" />
+        </svg>
+      );
+    case 'Rook':
+      return (
+        <svg className={svgBase} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="6" y="2" width="12" height="6" rx="1" ry="1"/>
+          <path d="M8 8V22H16V8M6 22H18M9 2L9 8M15 2L15 8"/>
+        </svg>
+      );
+    case 'Bishop':
+      return (
+        <svg className={svgBase} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2C8 2 6 8 6 12S8 22 12 22S18 16 18 12S16 2 12 2Z" />
+          <path d="M12 2V6M9 2L15 2M9 18L15 18M12 6C10 6 9 8 9 12S10 18 12 18S15 16 15 12S14 6 12 6Z" />
+        </svg>
+      );
+    case 'Knight':
+      return (
+        <svg className={svgBase} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 4L12 8L10 12L12 16L10 20L4 20L4 16L8 16L8 12L4 12L4 8L8 8L8 4L10 4Z" />
+          <path d="M14 6L18 6L18 10L14 10L14 6Z" />
+          <path d="M18 14L18 18L14 18L14 14L18 14Z" />
+        </svg>
+      );
+    case 'Pawn':
+      return (
+        <svg className={svgBase} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="6" r="3"/>
+          <path d="M12 9V22M9 19H15M10 12H14"/>
+        </svg>
+      );
+    default:
+      return null;
+  }
+};
+
+// PieceIcon komponent for å rendre SVG
+const PieceIcon = ({ type, color }) => {
+  return getPieceSVG(type, color);
+};
+
+// --- Hjelpefunksjoner for sjakklogikk ---
+const initialBoard = [
+  ['Rook', 'Knight', 'Bishop', 'Queen', 'King', 'Bishop', 'Knight', 'Rook'],
+  ['Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn'],
+  [null, null, null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null],
+  ['Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn', 'Pawn'],
+  ['Rook', 'Knight', 'Bishop', 'Queen', 'King', 'Bishop', 'Knight', 'Rook'],
+];
+
+const pieceColors = {
+  0: 'black',
+  1: 'black',
+  6: 'white',
+  7: 'white',
+};
+
+const initializeChessBoard = () => {
+  return initialBoard.map((row, rowIndex) =>
+    row.map((pieceType) =>
+      pieceType
+        ? {
+            type: pieceType,
+            color: pieceColors[rowIndex] || null,
+            hasMoved: false,
+          }
+        : null
+    )
+  );
+};
+
+const isValidPosition = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+
+const isOpponentPiece = (board, r, c, currentPlayerColor) => {
+  if (!isValidPosition(r, c) || !board[r][c]) return false;
+  return board[r][c].color !== currentPlayerColor;
+};
+
+const isFriendlyPiece = (board, r, c, currentPlayerColor) => {
+  if (!isValidPosition(r, c) || !board[r][c]) return false;
+  return board[r][c].color === currentPlayerColor;
+};
+
+// Funksjon for å generere gyldige trekk for bønder
+const getPawnMoves = (board, r, c, color) => {
+  const moves = [];
+  const direction = color === 'white' ? -1 : 1; // Hvit går opp, Svart går ned
+
+  // Ett skritt freover
+  if (isValidPosition(r + direction, c) && !board[r + direction][c]) {
+    moves.push([r + direction, c]);
+    // To skritt freover fra startposisjon
+    if (
+      (color === 'white' && r === 6) || (color === 'black' && r === 1)
+    ) {
+      if (isValidPosition(r + direction * 2, c) && !board[r + direction * 2][c]) {
+        moves.push([r + direction * 2, c]);
+      }
+    }
+  }
+
+  // Slag diagonalt
+  const attackCols = [c - 1, c + 1];
+  attackCols.forEach((col) => {
+    if (isValidPosition(r + direction, col) && isOpponentPiece(board, r + direction, col, color)) {
+      moves.push([r + direction, col]);
+    }
+  });
+
+  // TODO: Implementer En Passant (ikke inkludert i denne versjonen)
+
+  return moves;
+};
+
+// Funksjon for å generere gyldige trekk for tårn
+const getRookMoves = (board, r, c, color) => {
+  const moves = [];
+  const directions = [
+    [-1, 0], // Opp
+    [1, 0],  // Ned
+    [0, -1], // Venstre
+    [0, 1],  // Høyre
+  ];
+
+  directions.forEach(([dr, dc]) => {
+    let newR = r + dr;
+    let newC = c + dc;
+    while (isValidPosition(newR, newC)) {
+      if (!board[newR][newC]) {
+        moves.push([newR, newC]);
+      } else if (isOpponentPiece(board, newR, newC, color)) {
+        moves.push([newR, newC]);
+        break; // Stopper etter å ha slått en brikke
+      } else {
+        break; // Stopper ved vennlig brikke
+      }
+      newR += dr;
+      newC += dc;
+    }
+  });
+  return moves;
+};
+
+// Funksjon for å generere gyldige trekk for springere
+const getKnightMoves = (board, r, c, color) => {
+  const moves = [];
+  const knightMoves = [
+    [-2, -1], [-2, 1],
+    [-1, -2], [-1, 2],
+    [1, -2], [1, 2],
+    [2, -1], [2, 1],
+  ];
+
+  knightMoves.forEach(([dr, dc]) => {
+    const newR = r + dr;
+    const newC = c + dc;
+    if (
+      isValidPosition(newR, newC) &&
+      !isFriendlyPiece(board, newR, newC, color)
+    ) {
+      moves.push([newR, newC]);
+    }
+  });
+  return moves;
+};
+
+// Funksjon for å generere gyldige trekk for løpere
+const getBishopMoves = (board, r, c, color) => {
+  const moves = [];
+  const directions = [
+    [-1, -1], [-1, 1],
+    [1, -1], [1, 1],
+  ]; // Alle diagonale retninger
+
+  directions.forEach(([dr, dc]) => {
+    let newR = r + dr;
+    let newC = c + dc;
+    while (isValidPosition(newR, newC)) {
+      if (!board[newR][newC]) {
+        moves.push([newR, newC]);
+      } else if (isOpponentPiece(board, newR, newC, color)) {
+        moves.push([newR, newC]);
+        break;
+      } else {
+        break; // Vennlig brikke blokkerer
+      }
+      newR += dr;
+      newC += dc;
+    }
+  });
+  return moves;
+};
+
+// Funksjon for å generere gyldige trekk for dronning (kombinasjon av tårn og løper)
+const getQueenMoves = (board, r, c, color) => {
+  return [...getRookMoves(board, r, c, color), ...getBishopMoves(board, r, c, color)];
+};
+
+// Funksjon for å generere gyldige trekk for konge
+const getKingMoves = (board, r, c, color) => {
+  const moves = [];
+  const kingMoves = [
+    [-1, -1], [-1, 0], [-1, 1],
+    [0, -1],           [0, 1],
+    [1, -1], [1, 0], [1, 1],
+  ];
+
+  kingMoves.forEach(([dr, dc]) => {
+    const newR = r + dr;
+    const newC = c + dc;
+    // Merk: Denne forenklede implementasjonen sjekker ikke om kongen flytter inn i sjakk.
+    // En fullstendig sjakkimplementasjon vil kreve å sjekke om kongen blir stående/flyttet i sjakk.
+    if (
+      isValidPosition(newR, newC) &&
+      !isFriendlyPiece(board, newR, newC, color)
+    ) {
+      moves.push([newR, newC]);
+    }
+  });
+
+  // TODO: Implementer Rokade (ikke inkludert i denne versjonen)
+
+  return moves;
+};
+
+
+// Hovedfunksjon for å få gyldige trekk for en brikke
+const getValidMovesForPiece = (board, r, c) => {
+  const piece = board[r][c];
+  if (!piece) return [];
+
+  switch (piece.type) {
+    case 'Pawn':
+      return getPawnMoves(board, r, c, piece.color);
+    case 'Rook':
+      return getRookMoves(board, r, c, piece.color);
+    case 'Knight':
+      return getKnightMoves(board, r, c, piece.color);
+    case 'Bishop':
+      return getBishopMoves(board, r, c, piece.color);
+    case 'Queen':
+      return getQueenMoves(board, r, c, piece.color);
+    case 'King':
+      return getKingMoves(board, r, c, piece.color);
+    default:
+      return [];
+  }
+};
+
+// --- AI Logikk (Minimax med Alpha-Beta beskjæring) ---
+
+const pieceValues = {
+  'Pawn': 10,
+  'Knight': 30,
+  'Bishop': 30,
+  'Rook': 50,
+  'Queen': 90,
+  'King': 900 // Kongens verdi er svært høy for å unngå dens tap
+};
+
+// Enkel funksjon for å evaluere brettet fra AI's perspektiv (svart)
+// Positiv score er bra for AI (svart), negativ score er bra for spiller (hvit)
+const evaluateBoard = (board) => {
+  let score = 0;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = board[r][c];
+      if (piece) {
+        if (piece.color === 'black') { // AI's brikker
+          score += pieceValues[piece.type];
+        } else { // Spillerens brikker (hvit)
+          score -= pieceValues[piece.type];
+        }
+      }
+    }
+  }
+  return score;
+};
+
+// Minimax algoritme med Alpha-Beta beskjæring
+const minimax = (currentBoard, depth, isMaximizingPlayer, alpha, beta) => {
+  if (depth === 0) {
+    return evaluateBoard(currentBoard);
+  }
+
+  const currentPlayerColor = isMaximizingPlayer ? 'black' : 'white';
+  let bestValue = isMaximizingPlayer ? -Infinity : Infinity;
+
+  // Generer alle mulige trekk for gjeldende spiller
+  let allPossibleMoves = [];
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = currentBoard[r][c];
+      if (piece && piece.color === currentPlayerColor) {
+        const moves = getValidMovesForPiece(currentBoard, r, c);
+        moves.forEach(move => allPossibleMoves.push({ fromR: r, fromC: c, toR: move[0], toC: move[1] }));
+      }
+    }
+  }
+
+  // Hvis ingen gyldige trekk, er det patt eller sjakkmatt (forenklet)
+  if (allPossibleMoves.length === 0) {
+      // Returner en verdi som indikerer en uavgjort/ingen vinner for enkel AI
+      return 0; // Mer sofistikert AI ville differensiert mellom patt og sjakkmatt
+  }
+
+  for (const move of allPossibleMoves) {
+    const newBoard = JSON.parse(JSON.stringify(currentBoard));
+    const movingPiece = { ...newBoard[move.fromR][move.fromC], hasMoved: true }; // Oppdater hasMoved
+    newBoard[move.toR][move.toC] = movingPiece;
+    newBoard[move.fromR][move.fromC] = null;
+
+    // Håndter bondefremmelse i AI's søk
+    if (movingPiece.type === 'Pawn' && ((movingPiece.color === 'white' && move.toR === 0) || (movingPiece.color === 'black' && move.toR === 7))) {
+      newBoard[move.toR][move.toC].type = 'Queen';
+    }
+
+    const value = minimax(newBoard, depth - 1, !isMaximizingPlayer, alpha, beta);
+
+    if (isMaximizingPlayer) {
+      bestValue = Math.max(bestValue, value);
+      alpha = Math.max(alpha, bestValue);
+    } else {
+      bestValue = Math.min(bestValue, value);
+      beta = Math.min(beta, bestValue);
+    }
+
+    if (beta <= alpha) { // Alpha-beta beskjæring
+      break;
+    }
+  }
+  return bestValue;
+};
+
+// Funksjon for at AI skal finne sitt beste trekk
+const findBestMoveForAI = (board, aiColor, depth) => {
+  let bestMove = null;
+  let bestValue = -Infinity; // AI maksimerer sin score
+
+  let allAiMoves = [];
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = board[r][c];
+      if (piece && piece.color === aiColor) {
+        const moves = getValidMovesForPiece(board, r, c);
+        moves.forEach(move => allAiMoves.push({ fromR: r, fromC: c, toR: move[0], toC: move[1] }));
+      }
+    }
+  }
+
+  // Shuffle moves for more varied play, especially at lower depths
+  allAiMoves.sort(() => Math.random() - 0.5);
+
+  for (const move of allAiMoves) {
+    const newBoard = JSON.parse(JSON.stringify(board));
+    const movingPiece = { ...newBoard[move.fromR][move.fromC], hasMoved: true };
+    newBoard[move.toR][move.toC] = movingPiece;
+    newBoard[move.fromR][move.fromC] = null;
+
+    // Håndter bondefremmelse i AI's fremtidige trekkberegning
+    if (movingPiece.type === 'Pawn' && move.toR === 7) { // Svart bonde når siste rad
+        newBoard[move.toR][move.toC].type = 'Queen';
+    }
+
+    // Kall minimax for den motstående spilleren (minimerende spiller)
+    const moveValue = minimax(newBoard, depth - 1, false, -Infinity, Infinity);
+
+    if (moveValue > bestValue) {
+      bestValue = moveValue;
+      bestMove = move;
+    }
+  }
+  return bestMove;
+};
+
+// Funksjon for å bestemme AI-dybde basert på vanskelighetsgrad
+const getAIDepth = (difficulty) => {
+  switch (difficulty) {
+    case 'easy':
+      return 1;
+    case 'medium':
+      return 2;
+    case 'hard':
+      return 3; // Merk: Dybde 3 kan være tregt i nettleseren for sjakk, optimaliseringer trengs for raskere ytelse.
+    default:
+      return 1;
+  }
+};
+
+
+// --- Hovedkomponent for sjakkspillet ---
+const App = () => {
+  // Firebase initialization
+  const [app, setApp] = useState(null);
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
+  // Game state
+  const [board, setBoard] = useState(initializeChessBoard());
+  const [selectedPiece, setSelectedPiece] = useState(null); // { r, c }
+  const [validMoves, setValidMoves] = useState([]);
+  const [turn, setTurn] = useState('white'); // 'white' or 'black'
+  const [message, setMessage] = useState(''); // Spillmeldinger (f.eks., "Hvit sin tur", "Sjakkmatt!")
+  const [aiDifficulty, setAiDifficulty] = useState('easy'); // 'easy', 'medium', 'hard'
+  const [isAITurn, setIsAITurn] = useState(false); // For å indikere om AI tenker
+  const [gameName, setGameName] = useState(''); // Navn på spillet for lagring/lasting
+  const [lastHumanMove, setLastHumanMove] = useState(null); // Lagrer det siste menneskelige trekket for analyse
+  const [llmAnalysis, setLlmAnalysis] = useState(''); // Lagrer KI-analyse av trekket
+  const [isLoadingLLMResponse, setIsLoadingLLMResponse] = useState(false); // Indikerer om KI-analyse lastes
+  const [strategicAdvice, setStrategicAdvice] = useState(''); // Lagrer KI-strategisk råd
+  const [isLoadingStrategicAdvice, setIsLoadingStrategicAdvice] = useState(false); // Indikerer om strategisk råd lastes
+
+  // Initialize Firebase
+  useEffect(() => {
+    const initializeFirebase = async () => {
+      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+      const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+      const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+      if (firebaseConfig) {
+        try {
+          const firebaseApp = initializeApp(firebaseConfig);
+          const firebaseAuth = getAuth(firebaseApp);
+          const firebaseFirestore = getFirestore(firebaseApp);
+
+          setApp(firebaseApp);
+          setAuth(firebaseAuth);
+          setDb(firebaseFirestore);
+
+          if (initialAuthToken) {
+            await signInWithCustomToken(firebaseAuth, initialAuthToken);
+          } else {
+            await signInAnonymously(firebaseAuth);
+          }
+
+          onAuthStateChanged(firebaseAuth, (user) => {
+            if (user) {
+              setUserId(user.uid);
+            } else {
+              setUserId(null);
+            }
+            setIsAuthReady(true);
+          });
+        } catch (error) {
+          console.error("Firebase initialisering feilet:", error);
+          setIsAuthReady(true);
+        }
+      } else {
+        console.warn("Firebase konfigurasjon ikke tilgjengelig. Kjører uten Firebase.");
+        setIsAuthReady(true);
+      }
+    };
+
+    initializeFirebase();
+  }, []);
+
+  // Hjelpefunksjon for å konvertere brettet til en enkel strengrepresentasjon for LLM
+  const getBoardStringForLLM = (currentBoard) => {
+    let boardString = '';
+    const pieceMap = {
+      'Pawn': 'p', 'Knight': 'n', 'Bishop': 'b', 'Rook': 'r', 'Queen': 'q', 'King': 'k'
+    };
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = currentBoard[r][c];
+        if (piece) {
+          boardString += piece.color === 'white' ? pieceMap[piece.type].toUpperCase() : pieceMap[piece.type];
+        } else {
+          boardString += '--'; // Tom rute
+        }
+        boardString += ' '; // Separator
+      }
+      boardString += '\n'; // Ny linje for hver rad
+    }
+    return boardString;
+  };
+
+  // Funksjon for å hente trekkvurdering fra LLM
+  const getMoveAnalysis = async () => {
+    if (!lastHumanMove || isLoadingLLMResponse) {
+      setMessage('Ingen trekk å analysere, eller analyse pågår.');
+      return;
+    }
+
+    setIsLoadingLLMResponse(true);
+    setLlmAnalysis('Henter analyse fra KI...');
+
+    const boardString = getBoardStringForLLM(board);
+    const { from, to, pieceType, pieceColor } = lastHumanMove;
+    const moveDescription = `${pieceColor === 'white' ? 'Hvit' : 'Svart'} flyttet ${pieceType} fra (${from.r},${from.c}) til (${to.r},${to.c}).`;
+
+    const prompt = `Gitt følgende sjakkbrett:
+${boardString}
+Siste trekk ble gjort av ${moveDescription}
+Gi en kort analyse (2-3 setninger) av dette trekket. Var det et godt trekk? Hvorfor/hvorfor ikke?`;
+
+    let chatHistory = [];
+    chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+    const payload = { contents: chatHistory };
+    const apiKey = ""; // Canvas vil fylle ut denne under kjøring
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (result.candidates && result.candidates.length > 0 &&
+          result.candidates[0].content && result.candidates[0].content.parts &&
+          result.candidates[0].content.parts.length > 0) {
+        const text = result.candidates[0].content.parts[0].text;
+        setLlmAnalysis(text);
+        setMessage('Trekk vurdert!');
+      } else {
+        setLlmAnalysis('Fikk ingen analyse fra KI. Prøv igjen.');
+        setMessage('Feil ved KI-analyse.');
+      }
+    } catch (error) {
+      console.error("Feil ved kall til Gemini API:", error);
+      setLlmAnalysis('Fikk ingen analyse fra KI. Nettverksfeil eller API-problem.');
+      setMessage('Feil ved KI-analyse.');
+    } finally {
+      setIsLoadingLLMResponse(false);
+    }
+  };
+
+  // Funksjon for å hente strategisk råd fra LLM
+  const getStrategicAdvice = async () => {
+    if (isLoadingStrategicAdvice) {
+      setMessage('Strategisk råd pågår...');
+      return;
+    }
+
+    setIsLoadingStrategicAdvice(true);
+    setStrategicAdvice('Henter strategisk råd fra KI...');
+
+    const boardString = getBoardStringForLLM(board);
+    const currentPlayer = turn === 'white' ? 'Hvit' : 'Svart';
+
+    const prompt = `Gitt følgende sjakkbrett:
+${boardString}
+Det er ${currentPlayer} sin tur.
+Gi et kort strategisk råd (2-3 setninger) for denne spilleren. Hva bør de fokusere på i de neste trekkene? Tenk på generell sjakkstrategi som kontroll av sentrum, brikkeutvikling, sikkerhet for kongen, etc.`;
+
+    let chatHistory = [];
+    chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+    const payload = { contents: chatHistory };
+    const apiKey = ""; // Canvas vil fylle ut denne under kjøring
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (result.candidates && result.candidates.length > 0 &&
+          result.candidates[0].content && result.candidates[0].content.parts &&
+          result.candidates[0].content.parts.length > 0) {
+        const text = result.candidates[0].content.parts[0].text;
+        setStrategicAdvice(text);
+        setMessage('Strategisk råd gitt!');
+      } else {
+        setStrategicAdvice('Fikk ingen strategisk råd fra KI. Prøv igjen.');
+        setMessage('Feil ved KI-råd.');
+      }
+    } catch (error) {
+      console.error("Feil ved kall til Gemini API for strategisk råd:", error);
+      setStrategicAdvice('Fikk ingen strategisk råd fra KI. Nettverksfeil eller API-problem.');
+      setMessage('Feil ved KI-råd.');
+    } finally {
+      setIsLoadingStrategicAdvice(false);
+    }
+  };
+
+
+  // Håndterer klikk på en rute på brettet
+  const handleSquareClick = useCallback(
+    (r, c) => {
+      if (isAITurn) return;
+      const piece = board[r][c];
+
+      if (selectedPiece) {
+        if (selectedPiece.r === r && selectedPiece.c === c) {
+          setSelectedPiece(null);
+          setValidMoves([]);
+          setMessage('');
+        } else if (
+          validMoves.some((move) => move[0] === r && move[1] === c)
+        ) {
+          const newBoard = JSON.parse(JSON.stringify(board));
+          const movingPiece = { ...newBoard[selectedPiece.r][selectedPiece.c], hasMoved: true };
+          newBoard[selectedPiece.r][selectedPiece.c] = null;
+          newBoard[r][c] = movingPiece;
+
+          if (movingPiece.type === 'Pawn' && r === 0) {
+            newBoard[r][c].type = 'Queen';
+          }
+
+          setBoard(newBoard);
+          setSelectedPiece(null);
+          setValidMoves([]);
+          setTurn(turn === 'white' ? 'black' : 'white');
+          setMessage('');
+          setLastHumanMove({ // Lagrer det menneskelige trekket
+            from: selectedPiece,
+            to: { r, c },
+            pieceType: movingPiece.type,
+            pieceColor: movingPiece.color,
+          });
+          setLlmAnalysis(''); // Tømmer tidligere analyse ved nytt trekk
+          setStrategicAdvice(''); // Tømmer strategisk råd ved nytt trekk
+        } else {
+          if (piece && piece.color === turn) {
+            setSelectedPiece({ r, c });
+            setValidMoves(getValidMovesForPiece(board, r, c));
+            setMessage('');
+          } else {
+            setMessage('Ugyldig trekk.');
+            setSelectedPiece(null);
+            setValidMoves([]);
+          }
+        }
+      } else {
+        if (piece && piece.color === turn) {
+          setSelectedPiece({ r, c });
+          setValidMoves(getValidMovesForPiece(board, r, c));
+          setMessage('');
+        } else if (piece && piece.color !== turn) {
+          setMessage('Det er ikke din tur, eller du valgte feil farge.');
+        } else {
+          setMessage('Velg en brikke å flytte.');
+        }
+      }
+    },
+    [board, selectedPiece, validMoves, turn, isAITurn]
+  );
+
+  // Effekt for å håndtere AI sin tur
+  useEffect(() => {
+    if (isAuthReady && turn === 'black' && !selectedPiece && !isAITurn) {
+      setIsAITurn(true);
+      setMessage('KI tenker...');
+      const delay = aiDifficulty === 'easy' ? 500 : aiDifficulty === 'medium' ? 1000 : 2000;
+
+      setTimeout(() => {
+        try {
+          const aiMove = findBestMoveForAI(board, 'black', getAIDepth(aiDifficulty));
+          if (aiMove) {
+            const newBoard = JSON.parse(JSON.stringify(board));
+            const movingPiece = { ...newBoard[aiMove.fromR][aiMove.fromC], hasMoved: true };
+            newBoard[aiMove.toR][aiMove.toC] = movingPiece;
+            newBoard[aiMove.fromR][aiMove.fromC] = null;
+
+            if (movingPiece.type === 'Pawn' && movingPiece.color === 'black' && aiMove.toR === 7) {
+                newBoard[aiMove.toR][aiMove.toC].type = 'Queen';
+            }
+
+            setBoard(newBoard);
+            setTurn('white');
+            setMessage('Hvit sin tur.');
+            setLlmAnalysis(''); // Tømmer analyse ved KI-trekk
+            setStrategicAdvice(''); // Tømmer strategisk råd ved KI-trekk
+          } else {
+            setMessage('KI fant ingen trekk. Sjakkmatt eller patt? Start nytt spill.');
+          }
+        } catch (error) {
+          console.error("KI-trekk feil:", error);
+          setMessage("KI fikk en feil, prøv igjen. Konsoll for detaljer.");
+        } finally {
+          setIsAITurn(false);
+        }
+      }, delay);
+    }
+  }, [turn, board, selectedPiece, aiDifficulty, isAITurn, isAuthReady]);
+
+  // Initial melding og når turen skifter
+  useEffect(() => {
+    if (isAuthReady) {
+      console.log("Firebase Auth klar. Bruker-ID:", userId);
+    }
+    setMessage(`${turn === 'white' ? 'Hvit' : 'Svart'} sin tur.`);
+  }, [turn, isAuthReady, userId]);
+
+  const resetGame = useCallback(() => {
+    setBoard(initializeChessBoard());
+    setSelectedPiece(null);
+    setValidMoves([]);
+    setTurn('white');
+    setMessage('');
+    setIsAITurn(false);
+    setGameName(''); // Clear game name on reset
+    setLastHumanMove(null); // Tømmer siste trekk
+    setLlmAnalysis(''); // Tømmer LLM analyse
+    setStrategicAdvice(''); // Tømmer strategisk råd
+  }, []);
+
+  // Funksjon for å lagre spill
+  const saveGame = async () => {
+    if (!db || !userId || !gameName) {
+      setMessage('Kan ikke lagre: Logg inn eller skriv inn et spillnavn.');
+      return;
+    }
+
+    try {
+      // Serialize board to JSON string for Firestore array-of-objects compatibility
+      const serializedBoard = JSON.stringify(board);
+      const gameData = {
+        board: serializedBoard,
+        turn,
+        aiDifficulty,
+        timestamp: Date.now(),
+        lastHumanMove: lastHumanMove ? JSON.stringify(lastHumanMove) : null, // Lagrer siste trekk
+        llmAnalysis: llmAnalysis || '', // Lagrer siste LLM analyse
+        strategicAdvice: strategicAdvice || '', // Lagrer siste strategiske råd
+      };
+      const gameDocRef = doc(db, `artifacts/${__app_id}/users/${userId}/chessGames`, gameName);
+      await setDoc(gameDocRef, gameData);
+      setMessage(`Spill "${gameName}" lagret!`);
+    } catch (error) {
+      console.error("Feil ved lagring av spill:", error);
+      setMessage('Feil ved lagring av spill.');
+    }
+  };
+
+  // Funksjon for å laste spill
+  const loadGame = async () => {
+    if (!db || !userId || !gameName) {
+      setMessage('Kan ikke laste: Logg inn eller skriv inn et spillnavn.');
+      return;
+    }
+
+    try {
+      const gameDocRef = doc(db, `artifacts/${__app_id}/users/${userId}/chessGames`, gameName);
+      const gameSnap = await getDoc(gameDocRef);
+
+      if (gameSnap.exists()) {
+        const data = gameSnap.data();
+        // Deserialize board from JSON string
+        const loadedBoard = JSON.parse(data.board);
+        setBoard(loadedBoard);
+        setTurn(data.turn);
+        setAiDifficulty(data.aiDifficulty || 'easy'); // Default if not found
+        setSelectedPiece(null);
+        setValidMoves([]);
+        setIsAITurn(false); // Ensure AI is not thinking immediately after load
+        setLastHumanMove(data.lastHumanMove ? JSON.parse(data.lastHumanMove) : null); // Laster siste trekk
+        setLlmAnalysis(data.llmAnalysis || ''); // Laster siste LLM analyse
+        setStrategicAdvice(data.strategicAdvice || ''); // Laster siste strategiske råd
+        setMessage(`Spill "${gameName}" lastet!`);
+      } else {
+        setMessage(`Spill "${gameName}" ble ikke funnet.`);
+      }
+    } catch (error) {
+      console.error("Feil ved lasting av spill:", error);
+      setMessage('Feil ved lasting av spill.');
+    }
+  };
+
+
+  return (
+    <div
+      className="min-h-screen bg-gradient-to-br from-gray-950 to-stone-950 text-gray-100 font-inter flex flex-col items-center justify-center p-4 overflow-hidden"
+      style={{ fontFamily: 'Inter, sans-serif' }}
+    >
+      <div className="bg-zinc-900 p-6 rounded-xl shadow-2xl border-4 border-amber-700 mb-8 w-full max-w-lg transform hover:scale-102 transition-transform duration-300">
+        <h1 className="text-5xl font-extrabold text-center text-cyan-400 mb-4 tracking-wider leading-tight animate-pulse-light">
+          CYBERPUNK SJAKK
+        </h1>
+        <p className="text-xl text-center text-fuchsia-400 mb-6 font-semibold">{message}</p>
+
+        {/* Board Container: Ensures consistent square size by limiting total width */}
+        <div className="w-full max-w-[400px] mx-auto aspect-square"> {/* Fikset max-width for konsistente ruter */}
+          <div className="grid grid-cols-8 border-4 border-amber-800 rounded-lg overflow-hidden w-full h-full shadow-inner-xl animate-fade-in">
+            {board.map((row, r) =>
+              row.map((piece, c) => {
+                const isLightSquare = (r + c) % 2 === 0;
+                const bgColor = isLightSquare ? 'bg-stone-700' : 'bg-zinc-800';
+                const isSelected = selectedPiece && selectedPiece.r === r && selectedPiece.c === c;
+                const isValidMoveTarget = validMoves.some((move) => move[0] === r && move[1] === c);
+
+                let squareClasses = `relative flex items-center justify-center text-5xl cursor-pointer transition-all duration-150 rounded-sm`;
+                // Ensuring squares take up equal space within the grid, making them consistently square.
+                squareClasses += ` ${bgColor}`;
+
+                if (isSelected) {
+                  squareClasses += ` ring-4 ring-cyan-500 ring-offset-2 ring-offset-zinc-900 shadow-neon-blue`;
+                } else if (isValidMoveTarget) {
+                  squareClasses += ` bg-blue-800/70 border-2 border-blue-400 shadow-neon-purple`;
+                }
+
+                return (
+                  <div
+                    key={`${r}-${c}`}
+                    className={squareClasses}
+                    onClick={() => handleSquareClick(r, c)}
+                    style={{ width: '100%', height: '100%' }} // Eksplisitt 100% bredde/høyde for å fylle grid-celle
+                  >
+                    {piece && (
+                      <PieceIcon type={piece.type} color={piece.color} />
+                    )}
+                    {isValidMoveTarget && !piece && (
+                      <div className="absolute w-4 h-4 rounded-full bg-blue-400 opacity-75 animate-ping"></div>
+                    )}
+                    {isValidMoveTarget && piece && (
+                      <div className="absolute inset-0 border-4 border-blue-400 rounded-sm animate-pulse-border"></div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* LLM Analysis Section */}
+        <div className="mt-6 p-4 bg-zinc-800 rounded-lg border border-cyan-600 shadow-inner-md">
+            <h3 className="text-xl font-bold text-cyan-300 mb-2">✨ KI-Innsikt:</h3>
+            
+            {/* Initial explanatory message, only shown if no analysis/advice is present yet */}
+            {!llmAnalysis && !strategicAdvice && !lastHumanMove && (
+                <p className="text-gray-200 mb-4">Gjør et trekk som hvit for å få trekkvurdering, eller klikk "Få Strategisk Råd" for å få generelle tips.</p>
+            )}
+
+            {/* Always show analysis/advice display areas if they have content */}
+            {llmAnalysis && (
+                <div className="mb-4">
+                    <p className="font-semibold text-fuchsia-300">Trekkvurdering:</p>
+                    {isLoadingLLMResponse ? (
+                      <p className="text-fuchsia-400 animate-pulse">{llmAnalysis}</p>
+                    ) : (
+                      <p className="text-gray-200">{llmAnalysis}</p>
+                    )}
+                </div>
+            )}
+
+            {strategicAdvice && (
+                <div className="mb-4">
+                    <p className="font-semibold text-fuchsia-300">Strategisk Råd:</p>
+                    {isLoadingStrategicAdvice ? (
+                      <p className="text-fuchsia-400 animate-pulse">{strategicAdvice}</p>
+                    ) : (
+                      <p className="text-gray-200">{strategicAdvice}</p>
+                    )}
+                </div>
+            )}
+
+            {/* Always show buttons */}
+            <div className="flex flex-col space-y-3">
+                <button
+                    onClick={getMoveAnalysis}
+                    className="bg-purple-700 hover:bg-purple-600 text-white font-bold py-2 px-5 rounded-lg shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border-2 border-purple-500 relative overflow-hidden group w-full"
+                    disabled={isLoadingLLMResponse || isAITurn || turn === 'black' || !lastHumanMove}
+                >
+                    <span className="absolute top-0 left-0 w-full h-full bg-purple-800 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    <span className="relative z-10">✨ Få Trekkvurdering</span>
+                </button>
+                <button
+                    onClick={getStrategicAdvice}
+                    className="bg-teal-700 hover:bg-teal-600 text-white font-bold py-2 px-5 rounded-lg shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border-2 border-teal-500 relative overflow-hidden group w-full"
+                    disabled={isLoadingStrategicAdvice || isAITurn}
+                >
+                    <span className="absolute top-0 left-0 w-full h-full bg-teal-800 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    <span className="relative z-10">✨ Få Strategisk Råd</span>
+                </button>
+            </div>
+          </div>
+        {/* End LLM Analysis Section */}
+
+        {/* Save/Load UI */}
+        <div className="mt-6 p-4 bg-zinc-800 rounded-lg border border-amber-600 shadow-inner-md">
+            <label htmlFor="game-name" className="block text-md font-bold text-amber-300 mb-2">
+                Spillnavn (for lagring/lasting):
+            </label>
+            <input
+                type="text"
+                id="game-name"
+                value={gameName}
+                onChange={(e) => setGameName(e.target.value)}
+                placeholder="Skriv inn spillnavn..."
+                className="w-full px-4 py-2 bg-zinc-700 border border-amber-600 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-500 text-cyan-300 transition-all duration-200 hover:border-cyan-500"
+                disabled={isAITurn}
+            />
+            <div className="flex flex-col sm:flex-row justify-between items-center mt-4 space-y-3 sm:space-y-0 sm:space-x-3">
+                <button
+                    onClick={saveGame}
+                    className="bg-green-700 hover:bg-green-600 text-white font-bold py-2 px-5 rounded-lg shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border-2 border-green-500 relative overflow-hidden group w-full sm:w-auto"
+                    disabled={isAITurn || !userId}
+                >
+                    <span className="absolute top-0 left-0 w-full h-full bg-green-800 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    <span className="relative z-10">Lagre Spill</span>
+                </button>
+                <button
+                    onClick={loadGame}
+                    className="bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-5 rounded-lg shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border-2 border-blue-500 relative overflow-hidden group w-full sm:w-auto"
+                    disabled={isAITurn || !userId}
+                >
+                    <span className="absolute top-0 left-0 w-full h-full bg-blue-800 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    <span className="relative z-10">Last Spill</span>
+                </button>
+            </div>
+        </div>
+
+
+        <div className="flex flex-col sm:flex-row justify-center items-center mt-6 space-y-4 sm:space-y-0 sm:space-x-4">
+            <div className="relative w-full sm:w-auto">
+                <label htmlFor="ai-difficulty" className="block text-md font-bold text-amber-300 mb-2 text-center sm:text-left">
+                    Velg KI-vanskelighetsgrad:
+                </label>
+                <select
+                    id="ai-difficulty"
+                    value={aiDifficulty}
+                    onChange={(e) => setAiDifficulty(e.target.value)}
+                    className="block w-full px-4 py-2 bg-zinc-800 border border-amber-600 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-500 text-cyan-300 appearance-none pr-8 transition-all duration-200 hover:border-cyan-500"
+                    disabled={isAITurn}
+                >
+                    <option value="easy" className="bg-zinc-800 text-cyan-300">Lett</option>
+                    <option value="medium" className="bg-zinc-800 text-cyan-300">Middels</option>
+                    <option value="hard" className="bg-zinc-800 text-cyan-300">Vanskelig (Kan være treg)</option>
+                </select>
+                {/* Custom dropdown arrow */}
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-cyan-400 mt-6 sm:mt-0">
+                  <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 6.757 7.586 5.343 9z"/></svg>
+                </div>
+            </div>
+            <button
+                onClick={resetGame}
+                className="bg-red-700 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border-2 border-red-500 relative overflow-hidden group w-full sm:w-auto"
+                disabled={isAITurn}
+            >
+                <span className="absolute top-0 left-0 w-full h-full bg-red-800 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                <span className="relative z-10">Nytt Spill</span>
+            </button>
+        </div>
+
+        <p className="text-sm text-center text-gray-400 mt-6">
+          <span className="font-semibold text-amber-300">Brukerveiledning:</span> Klikk på en brikke for å velge den, og klikk deretter på en gyldig rute for å flytte den. Du spiller som hvit, KI som svart.
+        </p>
+      </div>
+
+      <div className="mt-4 text-center text-gray-400 text-sm">
+        <p>
+          Laget med <span className="text-red-500">❤️</span> og MIT-lisens.
+        </p>
+        {userId && <p>Din bruker-ID: {userId}</p>}
+      </div>
+
+      {/* Custom CSS for animations and shadows */}
+      <style>{`
+        @keyframes pulse-light {
+          0%, 100% { text-shadow: 0 0 5px rgba(0, 255, 255, 0.5), 0 0 10px rgba(0, 255, 255, 0.3); }
+          50% { text-shadow: 0 0 8px rgba(0, 255, 255, 0.8), 0 0 15px rgba(0, 255, 255, 0.6); }
+        }
+        .animate-pulse-light {
+          animation: pulse-light 2s infinite alternate;
+        }
+
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.8s ease-out forwards;
+        }
+
+        .shadow-neon-blue {
+          box-shadow: 0 0 10px rgba(0, 255, 255, 0.7), 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+        .shadow-neon-purple {
+          box-shadow: 0 0 10px rgba(255, 0, 255, 0.7), 0 0 20px rgba(255, 0, 255, 0.5);
+        }
+
+        @keyframes ping {
+          0% { transform: scale(0.2); opacity: 0.8; }
+          80%, 100% { transform: scale(1.5); opacity: 0; }
+        }
+        .animate-ping {
+          animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+
+        @keyframes pulse-border {
+          0%, 100% { border-color: rgba(60, 220, 250, 0.8); }
+          50% { border-color: rgba(100, 240, 255, 1); }
+        }
+        .animate-pulse-border {
+          animation: pulse-border 1.5s infinite alternate;
+        }
+
+        /* Custom select arrow styling */
+        select::-ms-expand {
+          display: none;
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default App;
