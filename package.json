@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "chess.mjs": "^1.4.1"
+  }
+}
