@@ -11,13 +11,33 @@
     <p>A tangible implementation of the architectural blueprint.</p>
     
     <div class="board-container">
-        <canvas id="chessboard" width="640" height="640"></canvas>
+        <canvas id="chessboard" width="640" height="640" aria-label="Chessboard" role="img" tabindex="0"></canvas>
     </div>
 
     <div id="game-status" class="status-panel">
         Loading game...
     </div>
     <button id="reset-button">New Game</button>
+
+    <div id="settings-panel" class="settings-panel">
+        <label>
+            Board Theme:
+            <select id="theme-select">
+                <option value="default">Default</option>
+                <option value="blue">Blue</option>
+                <option value="green">Green</option>
+                <option value="light">Light</option>
+            </select>
+        </label>
+        <label>
+            Piece Style:
+            <select id="piece-style-select">
+                <option value="classic">Classic</option>
+                <!-- Add more options if you have more sets in pieces.js -->
+            </select>
+        </label>
+        <button id="toggle-darkmode">Toggle Dark Mode</button>
+    </div>
 
     <!-- Load chess.js as an ES Module -->
     <script type="module" src="app.js"></script>
